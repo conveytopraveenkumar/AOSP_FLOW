@@ -28,15 +28,15 @@ jobs:
           chmod 600 private-key.pem
       - name: Install AWS CLI on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@13.61.153.82 "
+          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@56.228.6.197 "
             sudo apt update &&
             sudo apt install awscli -y &&
             aws --version
           "
       - name: Run Commands on Existing EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@13.61.153.82 << 'EOF'
-          echo "Running on EC2 instance: i-04fcf82f4910a5675"
+          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@56.228.6.197 << 'EOF'
+          echo "Running on EC2 instance: i-05e7841b58c0f9811"
           echo 'Hello, world!' > helloworld.txt
           aws s3 cp helloworld.txt s3://piplineflow/
           EOF
