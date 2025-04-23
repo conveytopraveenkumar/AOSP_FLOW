@@ -29,10 +29,10 @@ jobs:
 
       - name: Verify SSH Connection
         run: |
-          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@$PUBLIC_IP "echo 'SSH Connection Established'"
+          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@13.61.153.82 "echo 'SSH Connection Established'"
       - name: Install AWS CLI on EC2
         run: |
-          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@$PUBLIC_IP "
+          ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@13.61.153.82 "
             sudo apt update &&
             sudo apt install awscli -y &&
             aws --version
