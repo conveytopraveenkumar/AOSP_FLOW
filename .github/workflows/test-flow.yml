@@ -42,5 +42,15 @@ jobs:
           ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@51.20.79.81 << 'EOF'
           echo "Running on EC2 instance: i-0b372ce164da60a78"
           echo 'Hello, world!' > helloworld.txt
+          
+          # Configure AWS credentials directly on the EC2 instance
+          aws configure set aws_access_key_id '${{ secrets.AWS_ACCESS_KEY_ID }}'
+          aws configure set aws_secret_access_key '${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+          aws configure set aws_session_token '${{ secrets.AWS_SESSION_TOKEN }}'
+          aws configure set region eu-north-1
+      
+          # Upload file to S3
           aws s3 cp helloworld.txt s3://piplineflow/
+      
           EOF
+
