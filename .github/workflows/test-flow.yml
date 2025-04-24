@@ -26,13 +26,16 @@ jobs:
         run: |
           echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
           chmod 600 private-key.pem
-      - name: Install AWS CLI on EC2
+
+      - name: Install AWS CLI on EC2 Using Official Installer
         run: |
           ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@51.20.79.81 "
-            sudo apt update &&
-            sudo apt install awscli -y &&
+            curl 'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip' -o 'awscliv2.zip' &&
+            unzip awscliv2.zip &&
+            sudo ./aws/install &&
             aws --version
           "
+
       - name: Run Commands on Existing EC2
         run: |
           ssh -o StrictHostKeyChecking=no -i private-key.pem ubuntu@51.20.79.81 << 'EOF'
