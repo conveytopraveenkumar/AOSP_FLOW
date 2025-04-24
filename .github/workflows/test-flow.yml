@@ -82,5 +82,5 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             echo "Executing repo commands inside container..."
-            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync"
+            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j10"
           EOF
