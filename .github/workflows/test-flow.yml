@@ -24,8 +24,8 @@ jobs:
           
       - name: Set EC2 Instance Details
         run: |
-          echo "INSTANCE_ID=i-0c24ee316ea82bcbf" >> $GITHUB_ENV
-          echo "INSTANCE_IP=13.49.125.175" >> $GITHUB_ENV
+          echo "INSTANCE_ID=i-072a52eaa9bc96feb" >> $GITHUB_ENV
+          echo "INSTANCE_IP=13.50.252.27" >> $GITHUB_ENV
 
       - name: Setup SSH Key for EC2 Access
         run: |
