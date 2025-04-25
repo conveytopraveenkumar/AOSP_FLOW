@@ -73,7 +73,7 @@ jobs:
 
       - name: Ensure Log Directory Exists
         run: |
-          ssh -tt -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             sudo mkdir -p /workspace/logs
             sudo chmod -R 777 /workspace
             sudo touch /workspace/logs/repo_sync.log
