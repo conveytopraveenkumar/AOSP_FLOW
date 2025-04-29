@@ -49,20 +49,20 @@ jobs:
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             sudo apt update && sudo apt install -y docker.io
             sudo usermod -aG docker ubuntu
-            newgrp docker
             sudo systemctl restart docker
           EOF
 
       - name: Check and Use Prebuilt Docker Image
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
-            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.2 2>&1 | grep 'not found')
+            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.2 2>&1 | grep 'not found' || true)
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
               docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.2
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
+              
               cat <<EOT > Dockerfile
               FROM ubuntu:20.04
               RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
@@ -89,13 +89,13 @@ jobs:
               docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.2
             fi
           EOF
-
-      - name: Check if Docker Container Started Correctly
-        run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
-            docker ps -a
-            docker logs aosp-container
-          EOF
+  
+          - name: Check if Docker Container Started Correctly
+            run: |
+              ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
+                docker ps -a
+                docker logs aosp-container
+              EOF
 
       - name: Execute Repo Commands in Container
         run: |
