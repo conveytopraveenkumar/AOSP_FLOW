@@ -58,7 +58,7 @@ jobs:
             IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.3 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.3
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
