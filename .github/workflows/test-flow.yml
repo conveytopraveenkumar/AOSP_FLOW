@@ -100,15 +100,24 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             echo "Executing repo commands inside container..."
-            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc)"
+            docker exec aosp-container bash -c "
+              apt update && apt install -y tmux
+              tmux new-session -d -s aosp-sync 'repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc)'
+            "
           EOF
-
+      
       - name: Set Up Environment & Build AOSP
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             docker exec aosp-container bash -c "
-              source build/envsetup.sh
-              lunch aosp_cf_x86_64_tv-userdebug
-              make -j\$(nproc) 2>&1 | tee /workspace/logs/build.log
+              if [ -f build/envsetup.sh ]; then
+                source build/envsetup.sh
+                lunch aosp_cf_x86_64_tv-userdebug
+                make -j\$(nproc) 2>&1 | tee /workspace/logs/build.log
+              else
+                echo 'Error: build/envsetup.sh not found!'
+                exit 1
+              fi
             "
           EOF
+
