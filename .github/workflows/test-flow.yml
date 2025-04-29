@@ -62,10 +62,18 @@ jobs:
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
+              
               echo "FROM ubuntu:20.04" > Dockerfile
-              echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
-              echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
-              echo "RUN apt update && apt install -y git curl python3 python3-pip" >> Dockerfile
+              echo "ENV DEBIAN_FRONTEND=noninteractive" >> Dockerfile
+              echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3" >> Dockerfile
+              
+              # Ensure timezone configuration runs before installing tzdata
+              echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime" >> Dockerfile
+              echo "RUN echo 'Asia/Kolkata' > /etc/timezone" >> Dockerfile
+              echo "RUN apt update && apt install -y tzdata" >> Dockerfile
+              echo "RUN dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
+              
+              # Install repo and setup environment
               echo "RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo" >> Dockerfile
               echo "RUN chmod a+x /usr/local/bin/repo && ln -s /usr/local/bin/repo /usr/bin/repo" >> Dockerfile
               
@@ -77,6 +85,7 @@ jobs:
               echo "#!/bin/bash" > entrypoint.sh
               echo "exec tail -f /dev/null" >> entrypoint.sh
               chmod +x entrypoint.sh
+
               
               echo "Building Docker image..."
               docker build -t doredlap/aosp-builder:1.3 .
