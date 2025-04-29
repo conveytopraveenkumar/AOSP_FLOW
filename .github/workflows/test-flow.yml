@@ -34,7 +34,7 @@ jobs:
           
       - name: Configure Swap Space (64GB)
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             sudo fallocate -l 64G /swapfile
             sudo chmod 600 /swapfile
             sudo mkswap /swapfile
@@ -46,7 +46,7 @@ jobs:
 
       - name: Install Docker on EC2
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             sudo apt update && sudo apt install -y docker.io
             sudo usermod -aG docker ubuntu
             newgrp docker
@@ -55,7 +55,7 @@ jobs:
 
       - name: Check and Use Prebuilt Docker Image
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.2 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
@@ -92,21 +92,21 @@ jobs:
 
       - name: Check if Docker Container Started Correctly
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             docker ps -a
             docker logs aosp-container
           EOF
 
       - name: Execute Repo Commands in Container
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             echo "Executing repo commands inside container..."
             docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc)"
           EOF
 
       - name: Set Up Environment & Build AOSP
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             docker exec aosp-container bash -c "
               source build/envsetup.sh
               lunch aosp_cf_x86_64_tv-userdebug
