@@ -26,6 +26,7 @@ jobs:
         run: |
           echo "INSTANCE_ID=i-0c095a956111f7bb1" >> $GITHUB_ENV
           echo "INSTANCE_IP=13.48.47.239" >> $GITHUB_ENV
+
       - name: Setup SSH Key for EC2 Access
         run: |
           echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
@@ -58,25 +59,32 @@ jobs:
             IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.2 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.2
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
-              echo "FROM ubuntu:20.04" > Dockerfileecho "RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo" >> Dockerfile
-              echo "RUN chmod a+x /usr/local/bin/repo && ln -s /usr/local/bin/repo /usr/bin/repo" >> Dockerfile
-              echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
-              echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
-              echo "WORKDIR /workspace" >> Dockerfile
-              echo "COPY entrypoint.sh /entrypoint.sh" >> Dockerfile
-              echo "RUN chmod +x /entrypoint.sh" >> Dockerfile
-              echo "ENTRYPOINT [\"/entrypoint.sh\"]" >> Dockerfile
-              echo "#!/bin/bash" > entrypoint.sh
-              echo "exec tail -f /dev/null" >> entrypoint.sh
+              cat <<EOT > Dockerfile
+              FROM ubuntu:20.04
+              RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+              RUN chmod a+x /usr/local/bin/repo && ln -s /usr/local/bin/repo /usr/bin/repo
+              RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata
+              RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata
+              WORKDIR /workspace
+              COPY entrypoint.sh /entrypoint.sh
+              RUN chmod +x /entrypoint.sh
+              ENTRYPOINT ["/entrypoint.sh"]
+              EOT
+              
+              cat <<EOT > entrypoint.sh
+              #!/bin/bash
+              exec tail -f /dev/null
+              EOT
+              
               chmod +x entrypoint.sh
               echo "Building Docker image..."
               docker build -t doredlap/aosp-builder:1.2 .
               echo "Pushing Docker image to Docker Hub..."
-              docker login -u "doredlap" -p "${{ secrets.DOCKER_HUB_PASSWORD }}"
+              echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login --username doredlap --password-stdin
               docker push doredlap/aosp-builder:1.2
               docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.2
             fi
@@ -93,7 +101,7 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             echo "Executing repo commands inside container..."
-            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc) "
+            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc)"
           EOF
 
       - name: Set Up Environment & Build AOSP
