@@ -89,7 +89,7 @@ jobs:
 
               
               echo "Building Docker image..."
-              docker build -t doredlap/aosp-builder:1.5.
+              docker build -t doredlap/aosp-builder:1.5 .
               echo "Pushing Docker image to Docker Hub..."
               echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login --username doredlap --password-stdin
               docker push doredlap/aosp-builder:1.5
