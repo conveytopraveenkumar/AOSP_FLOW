@@ -57,7 +57,7 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
-            echo "FROM ubuntu:20.04" > Dockerfile
+            echo "FROM ubuntu:22.04" > Dockerfile
             echo "ENV DEBIAN_FRONTEND=noninteractive" >> Dockerfile
             echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
             echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
@@ -67,13 +67,18 @@ jobs:
             docker login -u "doredlap" -p "${{ secrets.DOCKER_HUB_PASSWORD }}"
             docker push doredlap/aosp-builder:latest
           EOF
-
+     
       - name: Start AOSP Docker Container
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
           EOF
-
+      - name: Check if Docker Container Started Correctly
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
+            docker ps -a
+            docker logs aosp-container
+          EOF
       - name: Initialize Repo and Sync Source Code
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
