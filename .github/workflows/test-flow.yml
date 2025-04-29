@@ -102,14 +102,22 @@ jobs:
             echo "Executing repo commands inside container..."
             docker exec aosp-container bash -c "
               apt update && apt install -y tmux
-              tmux new-session -d -s aosp-sync 'repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc)'
+              tmux new-session -d -s aosp-sync 'repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc); tmux wait-for -S aosp-sync-done'
+              sleep 5
+              tmux list-sessions | grep aosp-sync || (echo 'Error: tmux session failed to start' && exit 1)
             "
           EOF
+
       
       - name: Set Up Environment & Build AOSP
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             docker exec aosp-container bash -c "
+              if [ ! -d /workspace/.repo ]; then
+                echo 'Error: Repo sync may have failed. .repo directory not found.'
+                exit 1
+              fi
+
               if [ -f build/envsetup.sh ]; then
                 source build/envsetup.sh
                 lunch aosp_cf_x86_64_tv-userdebug
