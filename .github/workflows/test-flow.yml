@@ -100,15 +100,12 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             echo "Executing repo commands inside container..."
-            docker exec aosp-container bash -c "
-              apt update && apt install -y tmux
-              tmux new-session -d -s aosp-sync 'repo init -u https://android.googlesource.com/platform/manifest && repo sync -c -j$(nproc); tmux wait-for -S aosp-sync-done'
-              sleep 5
-              tmux list-sessions | grep aosp-sync || (echo 'Error: tmux session failed to start' && exit 1)
-            "
+           docker exec aosp-container bash -c "
+            repo init -u https://android.googlesource.com/platform/manifest
+            repo sync -c -j$(nproc)
+          "
           EOF
 
-      
       - name: Set Up Environment & Build AOSP
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
