@@ -43,51 +43,60 @@ jobs:
             sudo sysctl vm.swappiness=10
             echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
           EOF
-
+      - name: Setup SSH Key for EC2 Access
+        run: |
+          echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
+          chmod 600 private-key.pem
       - name: Install Docker on EC2
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
             sudo apt update && sudo apt install -y docker.io
             sudo usermod -aG docker ubuntu
             newgrp docker
             sudo systemctl restart docker
           EOF
-
-      - name: Create & Build AOSP Docker Image
+      - name: Check and Use Prebuilt Docker Image
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
-            echo "FROM ubuntu:22.04" > Dockerfile
-            echo "ENV DEBIAN_FRONTEND=noninteractive" >> Dockerfile
-            echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
-            echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
-            echo "RUN mkdir -p ~/.bin && curl -o ~/.bin/repo https://storage.googleapis.com/git-repo-downloads/repo && chmod a+x ~/.bin/repo && ln -s ~/.bin/repo /usr/local/bin/repo" >> Dockerfile
-            echo "WORKDIR /workspace/AOSP_BUILD" >> Dockerfile
-            docker build -t doredlap/aosp-builder:1.0 .
-            docker login -u "doredlap" -p "${{ secrets.DOCKER_HUB_PASSWORD }}"
-            docker push doredlap/aosp-builder:1.0
-          EOF
-     
-      - name: Start AOSP Docker Container
-        run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            docker run -d --name aosp-container-docker --restart unless-stopped -v /home/ubuntu/aosp:/workspace/AOSP_BUILD doredlap/aosp-builder:1.0
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
+            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.2 2>&1 | grep 'not found')
+            if [[ -z "\$IMAGE_EXISTS" ]]; then
+              echo "Docker image found, running container..."
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
+            else
+              echo "Docker image not found, building and pushing..."
+              mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
+              echo "FROM ubuntu:20.04" > Dockerfile
+              echo "RUN apt update && apt install -y git curl python3 python3-pip" >> Dockerfile
+              echo "RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo" >> Dockerfile
+              echo "RUN chmod a+x /usr/local/bin/repo && ln -s /usr/local/bin/repo /usr/bin/repo" >> Dockerfile
+              echo "RUN apt update && apt install -y git curl python3 python3-pip openjdk-11-jdk wget unzip gcc g++ make libncurses5 libncurses5-dev bison flex gperf zip zlib1g-dev ccache lzop lsb-release sudo python-is-python3 tzdata" >> Dockerfile
+             echo "RUN ln -fs /usr/share/zoneinfo/Asia/Kolkata /etc/localtime && dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
+              echo "WORKDIR /workspace" >> Dockerfile
+              echo "COPY entrypoint.sh /entrypoint.sh" >> Dockerfile
+              echo "RUN chmod +x /entrypoint.sh" >> Dockerfile
+              echo "ENTRYPOINT [\"/entrypoint.sh\"]" >> Dockerfile
+              echo "#!/bin/bash" > entrypoint.sh
+              echo "exec tail -f /dev/null" >> entrypoint.sh
+              chmod +x entrypoint.sh
+              echo "Building Docker image..."
+              docker build -t doredlap/aosp-builder:1.2 .
+              echo "Pushing Docker image to Docker Hub..."
+              docker login -u "doredlap" -p "${{ secrets.DOCKER_HUB_PASSWORD }}"
+              docker push doredlap/aosp-builder:1.2
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.2
+            fi
           EOF
       - name: Check if Docker Container Started Correctly
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
             docker ps -a
-            docker logs aosp-container-docker
+            docker logs aosp-container
           EOF
-      - name: Initialize Repo and Sync Source Code
+      - name: Exec into Container and Run AOSP Repo Commands
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            docker exec aosp-container-docker bash -c "
-              rm -rf /workspace/.repo &&
-              mkdir -p /workspace/logs
-              repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r45
-              repo sync -j\$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log
-            "
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
+            echo "Executing repo commands inside container..."
+            docker exec aosp-container bash -c "repo init -u https://android.googlesource.com/accessories/manifest && repo sync"
           EOF
 
       - name: Set Up Environment & Build AOSP
@@ -98,10 +107,4 @@ jobs:
               lunch aosp_cf_x86_64_tv-userdebug
               make -j\$(nproc) 2>&1 | tee /workspace/logs/build.log
             "
-          EOF
-
-      - name: Display Build Logs
-        run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            cat /workspace/logs/build.log
           EOF
