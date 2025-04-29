@@ -71,7 +71,7 @@ jobs:
       - name: Start AOSP Docker Container
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
+            docker run -d --name aosp-container-docker --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:latest
           EOF
       - name: Check if Docker Container Started Correctly
         run: |
