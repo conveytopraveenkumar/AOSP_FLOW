@@ -15,13 +15,32 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v3
         
+      # - name: Configure AWS Credentials
+      #   uses: aws-actions/configure-aws-credentials@v3
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: eu-north-1
+      #     aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Install AWS CLI & jq
+        run: |
+          sudo apt update && sudo apt install -y awscli jq
+          aws --version && jq --version
+
+      - name: Assume AWS Role for Temporary Credentials
+        run: |
+          ASSUMED_ROLE=$(aws sts assume-role --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" --role-session-name "GitHubActionSession")
+          echo "AWS_ACCESS_KEY_ID=$(echo $ASSUMED_ROLE | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $ASSUMED_ROLE | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $ASSUMED_ROLE | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
           aws-region: eu-north-1
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
 
       - name: Launch EC2 Instance 
         run: |
