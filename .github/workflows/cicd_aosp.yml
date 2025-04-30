@@ -24,11 +24,8 @@ jobs:
       #     aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
       - name: Install AWS CLI & jq (Fixed)
         run: |
-          sudo apt update && sudo apt install -y jq unzip
-          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-          unzip awscliv2.zip
-          sudo ./aws/install
-          aws --version && jq --version
+          sudo apt update && sudo apt install -y jq 
+          jq --version
 
 
       - name: Assume AWS Role for Temporary Credentials
