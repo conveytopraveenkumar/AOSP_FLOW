@@ -90,10 +90,10 @@ jobs:
       - name: Check and Use Prebuilt Docker Image
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
-            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.4 2>&1 | grep 'not found')
+            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.5 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.5
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
@@ -107,7 +107,7 @@ jobs:
               echo "RUN echo 'Asia/Kolkata' > /etc/timezone" >> Dockerfile
               echo "RUN apt update && apt install -y tzdata" >> Dockerfile
               echo "RUN dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
-              echo "RUN apt update && sudo apt install -y ninja-build" >> Dockerfile
+              echo "RUN apt update && sudo apt install -y ninja-build rsync" >> Dockerfile
               
               # Install repo and setup environment
               echo "RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo" >> Dockerfile
@@ -124,11 +124,11 @@ jobs:
 
               
               echo "Building Docker image..."
-              docker build -t doredlap/aosp-builder:1.4 .
+              docker build -t doredlap/aosp-builder:1.5 .
               echo "Pushing Docker image to Docker Hub..."
               echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login --username doredlap --password-stdin
-              docker push doredlap/aosp-builder:1.4
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
+              docker push doredlap/aosp-builder:1.5
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.5
 
             fi
           EOF
