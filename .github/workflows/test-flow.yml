@@ -1,4 +1,4 @@
-name: Fresh AOSP Build on EC2 with Docker
+name: AOSP Build on EC2 with Docker
 
 on:
   push:
@@ -9,11 +9,14 @@ on:
 jobs:
   setup_aosp:
     runs-on: ubuntu-latest
+    timeout-minutes: 720
+    outputs:
+      instance_ip: ${{ steps.set_instance_ip.outputs.instance_ip }}
+      instance_id: ${{ steps.set_instance_id.outputs.instance_id }}
     steps:
-
       - name: Checkout Repository
         uses: actions/checkout@v3
-        
+
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
@@ -22,17 +25,51 @@ jobs:
           aws-region: eu-north-1
           aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
-      - name: Set EC2 Instance Details
+      - name: Launch EC2 Instance
+        id: set_instance
         run: |
-          echo "INSTANCE_ID=i-0c095a956111f7bb1" >> $GITHUB_ENV
-          echo "INSTANCE_IP=13.48.47.239" >> $GITHUB_ENV
+          UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
+            --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+            --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
 
+          SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
+          SG_ID=$(aws ec2 describe-security-groups --query 'SecurityGroups[0].GroupId' --output text)
+
+          INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
+            --count 1 --instance-type c5.4xlarge \
+            --key-name praveenkeyAWS \
+            --security-group-ids $SG_ID \
+            --subnet-id $SUBNET_ID \
+            --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
+            --query "Instances[0].InstanceId" --output text)
+
+          echo "::set-output name=instance_id::$INSTANCE_ID"
+
+          INSTANCE_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "::set-output name=instance_ip::$INSTANCE_IP"
+
+      - name: Wait for EC2 Instance to Start
+        run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+      - name: Ensure EC2 Instance Is Fully Initialized
+        run: |
+            while true; do
+              INSTANCE_STATE=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceState.Name" --output text)
+              SYSTEM_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].SystemStatus.Status" --output text)
+              INSTANCE_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceStatus.Status" --output text)
+   
+              echo "Current State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
+   
+              if [[ "$INSTANCE_STATE" == "running" && "$SYSTEM_STATUS" == "ok" && "$INSTANCE_STATUS" == "ok" ]]; then
+                echo "Instance is fully initialized!"
+                break
+              fi
+              sleep 10
+            done
       - name: Setup SSH Key for EC2 Access
         run: |
           echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
           chmod 600 private-key.pem
-          
-      - name: Configure Swap Space (64GB)
+      - name: Configure Swap Space
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
             sudo fallocate -l 64G /swapfile
@@ -43,7 +80,6 @@ jobs:
             sudo sysctl vm.swappiness=10
             echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf
           EOF
-
       - name: Install Docker on EC2
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
@@ -54,11 +90,11 @@ jobs:
 
       - name: Check and Use Prebuilt Docker Image
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
-            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.5 2>&1 | grep 'not found')
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.4 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.5
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
@@ -89,12 +125,11 @@ jobs:
 
               
               echo "Building Docker image..."
-              docker build -t doredlap/aosp-builder:1.5 .
+              docker build -t doredlap/aosp-builder:1.4 .
               echo "Pushing Docker image to Docker Hub..."
               echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login --username doredlap --password-stdin
-              docker push doredlap/aosp-builder:1.5
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.5
-
+              docker push doredlap/aosp-builder:1.4
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
             fi
           EOF
       - name: Ensure Log Directory Exists
@@ -104,24 +139,30 @@ jobs:
             sudo chmod -R 777 /workspace
             sudo touch /workspace/logs/repo_sync.log
           EOF
-      - name: Clear Repo and Perform Fresh Sync
+      - name: Repo Init & Sync
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP} << EOF
-            echo "Clearing old repo files..."
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
             docker exec aosp-container bash -c "
-              rm -rf /workspace/.repo &&
-              mkdir -p /workspace/logs
-              echo 'Initializing fresh repo sync...'
+              echo 'Initializing repo...'
               repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r45
-              for i in {1..3}; do
-                repo sync -c -j$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log && break || sleep 10
-              done
+              echo 'Syncing repo...'
+              repo sync -c -j\$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log
             "
           EOF
 
+  build_aosp:
+    needs: setup_aosp
+    runs-on: ubuntu-latest
+    timeout-minutes: 720
+    steps:
+      - name: Configure SSH Key for EC2 Access
+        run: |
+          echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
+          chmod 600 private-key.pem
+
       - name: Set Up Environment & Build AOSP
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30  ubuntu@${INSTANCE_IP} << "EOF"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
             docker exec aosp-container bash -c "
               if [ ! -d /workspace/.repo ]; then
                 echo 'Error: Repo sync may have failed. .repo directory not found.'
@@ -138,4 +179,3 @@ jobs:
               fi
             "
           EOF
-
