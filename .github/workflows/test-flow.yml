@@ -145,10 +145,14 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP} << EOF
             docker exec aosp-container bash -c "
+              rm -rf /workspace/.repo &&
+              mkdir -p /workspace/logs
               echo 'Initializing repo...'
               repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r45
               echo 'Syncing repo...'
-              repo sync -c -j\$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log
+               for i in {1..3}; do
+                repo sync -c -j$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log && break || sleep 10
+              done
             "
           EOF
 
@@ -179,5 +183,14 @@ jobs:
                 echo 'Error: build/envsetup.sh not found!'
                 exit 1
               fi
+            "
+          EOF
+      - name: Stop EC2 Instance After Build Completion (From Container)
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+            docker exec aosp-container bash -c "
+              aws ec2 stop-instances --instance-ids $INSTANCE_ID
+              aws ec2 wait instance-stopped --instance-ids $INSTANCE_ID
+              echo 'Instance $INSTANCE_ID has been successfully stopped.'
             "
           EOF
