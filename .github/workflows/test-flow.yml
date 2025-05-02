@@ -16,6 +16,9 @@ jobs:
     steps:
       - name: Checkout Repository
         uses: actions/checkout@v3
+        
+      - name: Export Build Number
+        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v3
@@ -93,10 +96,10 @@ jobs:
       - name: Check and Use Prebuilt Docker Image
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
-            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.4 2>&1 | grep 'not found')
+            IMAGE_EXISTS=\$(docker pull doredlap/aosp-builder:1.7 2>&1 | grep 'not found')
             if [[ -z "\$IMAGE_EXISTS" ]]; then
               echo "Docker image found, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.7
             else
               echo "Docker image not found, building and pushing..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
@@ -110,7 +113,7 @@ jobs:
               echo "RUN echo 'Asia/Kolkata' > /etc/timezone" >> Dockerfile
               echo "RUN apt update && apt install -y tzdata" >> Dockerfile
               echo "RUN dpkg-reconfigure --frontend noninteractive tzdata" >> Dockerfile
-              echo "RUN apt update && sudo apt install -y ninja-build" >> Dockerfile
+              echo "RUN apt update && sudo apt install -y ninja-build rsync awscli" >> Dockerfile
               
               # Install repo and setup environment
               echo "RUN mkdir -p /usr/local/bin && curl -o /usr/local/bin/repo https://storage.googleapis.com/git-repo-downloads/repo" >> Dockerfile
@@ -127,11 +130,11 @@ jobs:
 
               
               echo "Building Docker image..."
-              docker build -t doredlap/aosp-builder:1.4 .
+              docker build -t doredlap/aosp-builder:1.7 .
               echo "Pushing Docker image to Docker Hub..."
               echo "${{ secrets.DOCKER_HUB_PASSWORD }}" | docker login --username doredlap --password-stdin
-              docker push doredlap/aosp-builder:1.4
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.4
+              docker push doredlap/aosp-builder:1.7
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace doredlap/aosp-builder:1.7
             fi
           EOF
       - name: Ensure Log Directory Exists
@@ -175,19 +178,40 @@ jobs:
                 exit 1
               fi
 
-              if [ -f build/envsetup.sh ]; then
+               if [ -f build/envsetup.sh ]; then
                 source build/envsetup.sh
                 lunch aosp_cf_x86_64_tv-userdebug
-                make -j\$(nproc) 2>&1 | tee /workspace/logs/build.log
+                # Run make dist, exit workflow if it fails
+                make dist -j\$(nproc) 2>&1 | tee /workspace/logs/build.log || { 
+                  echo 'Error: AOSP build failed!' 
+                  exit 1 
+                }
               else
                 echo 'Error: build/envsetup.sh not found!'
                 exit 1
               fi
             "
           EOF
+      - name: Upload Build Files to S3 with Build Number
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+            docker exec aosp-container bash -c "
+              export AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'
+              export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+              export AWS_SESSION_TOKEN='${{ secrets.AWS_SESSION_TOKEN }}'
+              export AWS_DEFAULT_REGION='eu-north-1'
+              export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
+
+              cd /workspace/out/dist/
+              aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
+              aws s3 cp aosp_cf_x86_64_tv-img-eng* s3://piplineflow/build_\$BUILD_NUMBER/
+              echo 'Build files uploaded to S3 under folder build_\$BUILD_NUMBER!'
+            "
+          EOF
+
       - name: Stop EC2 Instance After Build Completion (From Container)
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${INSTANCE_IP} << EOF
             docker exec aosp-container bash -c "
               aws ec2 stop-instances --instance-ids $INSTANCE_ID
               aws ec2 wait instance-stopped --instance-ids $INSTANCE_ID
