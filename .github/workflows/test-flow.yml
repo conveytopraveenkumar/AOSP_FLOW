@@ -20,31 +20,12 @@ jobs:
       - name: Export Build Number
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
-      - name: Install AWS CLI & jq
+      - name: Install jq
         run: |
-          # Install unzip if it's missing
-          if ! command -v unzip &> /dev/null; then
-            echo "unzip is missing, installing..."
-            sudo apt update && sudo apt install -y unzip
-          fi
-      
-          sudo apt update && sudo apt install -y awscli jq || {
-            echo "AWS CLI or jq not found in apt repositories, installing manually..."
-            curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-            unzip awscliv2.zip
-            sudo ./aws/install
-            sudo rm -rf awscliv2.zip aws/
-            sudo snap install jq --classic
-          }
-      
-          # Verify installation success
-          if ! command -v aws &> /dev/null || ! command -v jq &> /dev/null; then
-            echo "Error: AWS CLI or jq installation failed!"
-            exit 1
-          fi
-      
-          aws --version && jq --version
-
+            sudo apt update && sudo apt install -y jq || {
+              echo "jq not found in apt repositories, installing via Snap..."
+              sudo snap install jq --classic
+            }
 
       - name: Assume AWS Role for Temporary Credentials
         run: |
