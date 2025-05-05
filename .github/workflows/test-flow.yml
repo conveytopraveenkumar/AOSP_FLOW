@@ -246,6 +246,7 @@ jobs:
               export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
               export AWS_SESSION_TOKEN='${{ secrets.AWS_SESSION_TOKEN }}'
               export AWS_DEFAULT_REGION='eu-north-1'
+      
               INSTANCE_ID=${{ needs.setup_aosp.outputs.instance_id }}
       
               # Ensure INSTANCE_ID is set before proceeding
@@ -254,18 +255,23 @@ jobs:
                 exit 1
               fi
       
-              # Debugging Step: Print instance details before stopping
               echo 'Attempting to stop EC2 instance ID:' \$INSTANCE_ID
       
-              # Stop EC2 instance with error handling
+              # Set AWS Region explicitly
+              aws configure set region eu-north-1
+      
+              # Stop instance and wait with a sleep buffer
               aws ec2 stop-instances --instance-ids \$INSTANCE_ID || {
                 echo 'Error: Failed to stop EC2 instance \$INSTANCE_ID'
                 exit 1
               }
+      
+              sleep 10  # Allow state transition
               aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
               echo 'Instance \$INSTANCE_ID has been successfully stopped.'
             "
           EOF
+
           
   run_ats_tests:
     needs: build_aosp  
