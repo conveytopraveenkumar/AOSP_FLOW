@@ -1,10 +1,14 @@
-name: AOSP Build on EC2 with Docker JOBS
+name: AOSP Repo Setup in EC2 with GHCR
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read  
 
 jobs:
   setup_aosp:
@@ -27,25 +31,30 @@ jobs:
             sudo snap install jq --classic
           }
 
-      - name: Assume AWS Role for Temporary Credentials
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      - name: Assume AWS Role with OIDC
         run: |
           # Define AWS region
           AWS_REGION="eu-north-1"
           echo "AWS_REGION=$AWS_REGION" >> $GITHUB_ENV
 
-          # Get temporary credentials via STS
-          ASSUMED_ROLE=$(aws sts assume-role --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" --role-session-name "GitHubActionSession" --query "Credentials" --output json)
+          # Retrieve OIDC token
+          OIDC_TOKEN=$(curl -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL")
+
+          # Assume AWS Role
+          ASSUMED_ROLE=$(aws sts assume-role-with-web-identity \
+            --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" \
+            --role-session-name "GitHubOIDCSession" \
+            --web-identity-token "$OIDC_TOKEN" \
+            --duration-seconds 3600)
 
           # Debugging output
           echo "Raw STS Output: $ASSUMED_ROLE"
 
           # Ensure valid credentials were received
-          ACCESS_KEY_ID=$(echo "$ASSUMED_ROLE" | jq -r '.AccessKeyId')
-          SECRET_ACCESS_KEY=$(echo "$ASSUMED_ROLE" | jq -r '.SecretAccessKey')
-          SESSION_TOKEN=$(echo "$ASSUMED_ROLE" | jq -r '.SessionToken')
+          ACCESS_KEY_ID=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.AccessKeyId')
+          SECRET_ACCESS_KEY=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.SecretAccessKey')
+          SESSION_TOKEN=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.SessionToken')
 
           if [[ -z "$ACCESS_KEY_ID" || "$ACCESS_KEY_ID" == "null" ]]; then
             echo "Error: Failed to assume AWS role!"
