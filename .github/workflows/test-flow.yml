@@ -1,14 +1,10 @@
-name: AOSP Repo Setup in EC2 with GHCR
+name: AOSP Build on EC2 with Docker JOBS
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-
-permissions:
-  id-token: write
-  contents: read  
 
 jobs:
   setup_aosp:
@@ -24,64 +20,14 @@ jobs:
       - name: Export Build Number
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
 
-      - name: Install jq
-        run: |
-          sudo apt update && sudo apt install -y jq || {
-            echo "jq not found in apt repositories, installing via Snap..."
-            sudo snap install jq --classic
-          }
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: eu-north-1
+          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
-      - name: Retrieve OIDC Token
-        run: |
-          OIDC_TOKEN=$(curl -sSL -H "Authorization: Bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL")
-
-          # Debugging: Check if OIDC token was retrieved
-          if [[ -z "$OIDC_TOKEN" || "$OIDC_TOKEN" == "null" ]]; then
-            echo "Error: Failed to retrieve OIDC token!"
-            exit 1
-          fi
-          
-          echo "OIDC Token Retrieved Successfully."
-
-      - name: Assume AWS Role with OIDC
-        run: |
-          # Define AWS region
-          AWS_REGION="eu-north-1"
-          echo "AWS_REGION=$AWS_REGION" >> $GITHUB_ENV
-
-          # Assume AWS Role
-          ASSUMED_ROLE=$(aws sts assume-role-with-web-identity \
-            --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" \
-            --role-session-name "GitHubOIDCSession" \
-            --web-identity-token "$OIDC_TOKEN" \
-            --duration-seconds 3600)
-
-          # Debugging: Check STS response
-          echo "Raw STS Output: $ASSUMED_ROLE"
-
-          # Extract credentials
-          ACCESS_KEY_ID=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.AccessKeyId')
-          SECRET_ACCESS_KEY=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.SecretAccessKey')
-          SESSION_TOKEN=$(echo "$ASSUMED_ROLE" | jq -r '.Credentials.SessionToken')
-
-          # Ensure credentials are valid
-          if [[ -z "$ACCESS_KEY_ID" || "$ACCESS_KEY_ID" == "null" ]]; then
-            echo "Error: Failed to assume AWS role!"
-            exit 1
-          fi
-
-          # Export credentials
-          echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
-          
-          echo "AWS Role Assumed Successfully."
-
-      - name: Verify AWS Credentials
-        run: |
-          aws sts get-caller-identity
-          
       - name: Launch EC2 Instance
         id: set_instance
         run: |
