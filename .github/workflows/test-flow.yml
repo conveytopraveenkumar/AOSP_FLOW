@@ -29,25 +29,24 @@ jobs:
 
       - name: Assume AWS Role for Temporary Credentials
         run: |
-          ASSUMED_ROLE=$(aws sts assume-role --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" --role-session-name "GitHubActionSession")
-
-          # Ensure we received valid credentials
-          if [ -z "$ASSUMED_ROLE" ] || [ "$(echo $ASSUMED_ROLE | jq -r '.Credentials.AccessKeyId')" == "null" ]; then
+          # Define AWS region
+          AWS_REGION="eu-north-1"
+          echo "AWS_REGION=$AWS_REGION" >> $GITHUB_ENV
+      
+          # Get temporary credentials via STS
+          ASSUMED_ROLE=$(aws sts assume-role --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" --role-session-name "GitHubActionSession" --query "Credentials" --output json)
+      
+          # Ensure valid credentials were received
+          if [[ -z "$ASSUMED_ROLE" || "$(echo $ASSUMED_ROLE | jq -r '.AccessKeyId')" == "null" ]]; then
             echo "Error: Failed to assume AWS role!"
             exit 1
           fi
+      
+          echo "AWS_ACCESS_KEY_ID=$(echo $ASSUMED_ROLE | jq -r '.AccessKeyId')" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$(echo $ASSUMED_ROLE | jq -r '.SecretAccessKey')" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$(echo $ASSUMED_ROLE | jq -r '.SessionToken')" >> $GITHUB_ENV
 
-          echo "AWS_ACCESS_KEY_ID=$(echo $ASSUMED_ROLE | jq -r '.Credentials.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $ASSUMED_ROLE | jq -r '.Credentials.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $ASSUMED_ROLE | jq -r '.Credentials.SessionToken')" >> $GITHUB_ENV
 
-      - name: Configure AWS Credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          aws-access-key-id: ${{ env.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ env.AWS_SECRET_ACCESS_KEY }}
-          aws-region: eu-north-1
-          aws-session-token: ${{ env.AWS_SESSION_TOKEN }}
           
       - name: Launch EC2 Instance
         id: set_instance
@@ -128,12 +127,12 @@ jobs:
             set -e  # Stop execution on failure
             echo "Checking if Docker image exists in GHCR..."
             
-            docker pull ghcr.io/${{ github.repository_owner }}/aosp-build-docker:latest || IMAGE_NOT_FOUND="true"
+            docker pull ghcr.io/${{ github.repository_owner }}/aosp-build-docker:1.0 || IMAGE_NOT_FOUND="true"
 
 
            if [[ -z "$IMAGE_NOT_FOUND" ]]; then
               echo "✅ Docker image found in GHCR, running container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace ghcr.io/${{ github.repository_owner }}/aosp-build-docker:latest
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace ghcr.io/${{ github.repository_owner }}/aosp-build-docker:1.0
             else
               echo "⚠️ Docker image not found, building and pushing to GHCR..."
               mkdir -p /home/ubuntu/aosp && cd /home/ubuntu/aosp
@@ -169,9 +168,9 @@ jobs:
                   exit 1
               }
               echo "Pushing Docker image to GHCR..."
-              docker push ghcr.io/${{ github.repository_owner }}/aosp-build-docker:latest && echo "✅ Image successfully pushed!"
+              docker push ghcr.io/${{ github.repository_owner }}/aosp-build-docker:1.0 && echo "✅ Image successfully pushed!"
               echo "Running newly built container..."
-              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace ghcr.io/${{ github.repository_owner }}/aosp-build-docker:latest
+              docker run -d --name aosp-container --restart unless-stopped -v /home/ubuntu/aosp:/workspace ghcr.io/${{ github.repository_owner }}/aosp-build-docker:1.0
             fi
           EOF
 
