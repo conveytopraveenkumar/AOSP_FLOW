@@ -143,7 +143,7 @@ jobs:
 
               
               echo "Building Docker image..."
-              docker build -t ghcr.io/${{ github.repository_owner }}/aosp-build-docker:latest . || {
+              docker build -t ghcr.io/${{ github.repository_owner }}/aosp-build-docker:1.0 . || {
                   echo "❌ Failed to build Docker image!"
                   exit 1
               }
