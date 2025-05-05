@@ -22,30 +22,43 @@ jobs:
 
       - name: Install jq
         run: |
-            sudo apt update && sudo apt install -y jq || {
-              echo "jq not found in apt repositories, installing via Snap..."
-              sudo snap install jq --classic
-            }
+          sudo apt update && sudo apt install -y jq || {
+            echo "jq not found in apt repositories, installing via Snap..."
+            sudo snap install jq --classic
+          }
 
       - name: Assume AWS Role for Temporary Credentials
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
         run: |
           # Define AWS region
           AWS_REGION="eu-north-1"
           echo "AWS_REGION=$AWS_REGION" >> $GITHUB_ENV
-      
+
           # Get temporary credentials via STS
           ASSUMED_ROLE=$(aws sts assume-role --role-arn "arn:aws:iam::482037961672:role/GithubDeploymentRole" --role-session-name "GitHubActionSession" --query "Credentials" --output json)
-      
+
+          # Debugging output
+          echo "Raw STS Output: $ASSUMED_ROLE"
+
           # Ensure valid credentials were received
-          if [[ -z "$ASSUMED_ROLE" || "$(echo $ASSUMED_ROLE | jq -r '.AccessKeyId')" == "null" ]]; then
+          ACCESS_KEY_ID=$(echo "$ASSUMED_ROLE" | jq -r '.AccessKeyId')
+          SECRET_ACCESS_KEY=$(echo "$ASSUMED_ROLE" | jq -r '.SecretAccessKey')
+          SESSION_TOKEN=$(echo "$ASSUMED_ROLE" | jq -r '.SessionToken')
+
+          if [[ -z "$ACCESS_KEY_ID" || "$ACCESS_KEY_ID" == "null" ]]; then
             echo "Error: Failed to assume AWS role!"
             exit 1
           fi
-      
-          echo "AWS_ACCESS_KEY_ID=$(echo $ASSUMED_ROLE | jq -r '.AccessKeyId')" >> $GITHUB_ENV
-          echo "AWS_SECRET_ACCESS_KEY=$(echo $ASSUMED_ROLE | jq -r '.SecretAccessKey')" >> $GITHUB_ENV
-          echo "AWS_SESSION_TOKEN=$(echo $ASSUMED_ROLE | jq -r '.SessionToken')" >> $GITHUB_ENV
 
+          echo "AWS_ACCESS_KEY_ID=$ACCESS_KEY_ID" >> $GITHUB_ENV
+          echo "AWS_SECRET_ACCESS_KEY=$SECRET_ACCESS_KEY" >> $GITHUB_ENV
+          echo "AWS_SESSION_TOKEN=$SESSION_TOKEN" >> $GITHUB_ENV
+
+      - name: Verify AWS Credentials
+        run: |
+          aws sts get-caller-identity
 
           
       - name: Launch EC2 Instance
