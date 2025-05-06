@@ -50,6 +50,7 @@ jobs:
             --key-name praveenkeyAWS \
             --security-group-ids $SG_ID \
             --subnet-id $SUBNET_ID \
+            --iam-instance-profile Name=GithubDeploymentRole \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
             --query "Instances[0].InstanceId" --output text)
 
