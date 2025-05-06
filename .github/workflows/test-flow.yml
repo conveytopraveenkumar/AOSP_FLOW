@@ -219,88 +219,109 @@ jobs:
       - name: Set Build Number
         run: |
           echo "BUILD_NUMBER=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
-  
+      
       - name: Upload Build Files to S3 with Build Number
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
-            docker exec aosp-container bash -c "
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << "EOF"
+            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+                        -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+                        -e AWS_REGION=eu-north-1 \
+                        aosp-container bash -c "
               export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
               echo 'Build Number inside Docker:' \$BUILD_NUMBER
-  
-              aws configure list
-              aws configure set region eu-north-1
-  
+      
+              # Verify credentials before proceeding
+              aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+      
+              # Upload files to S3
               cd /workspace/out/dist/
               aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
               aws s3 cp aosp_cf_x86_64_tv-img-eng.root.zip s3://piplineflow/build_\$BUILD_NUMBER/
+      
               echo 'Build files uploaded successfully to S3 under folder build_\$BUILD_NUMBER!'
             "
           EOF
-  
+      
       - name: Stop EC2 Instance After Build Completion
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
-            docker exec aosp-container bash -c "
-              INSTANCE_ID=${{ needs.setup_aosp.outputs.instance_id }}
-  
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ env.INSTANCE_IP }} << "EOF"
+            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+                        -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+                        -e AWS_REGION=eu-north-1 \
+                        aosp-container bash -c "
+              INSTANCE_ID=${{ env.INSTANCE_ID }}
+      
               if [ -z \"\$INSTANCE_ID\" ]; then
                 echo 'Error: INSTANCE_ID is empty!'
                 exit 1
               fi
-  
+      
+              # Verify AWS authentication before stopping the instance
+              aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+      
               aws ec2 stop-instances --instance-ids \$INSTANCE_ID
               aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
-  
+      
               echo 'Instance \$INSTANCE_ID has been successfully stopped.'
             "
           EOF
+
 
           
   run_ats_tests:
     needs: build_aosp  
     runs-on: ubuntu-latest
     steps:
-      - name: Configure SSH Key for EC2 Access
+      - name: Configure SSH Key for Local Server Access
         run: |
           echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
           chmod 600 private-key.pem
           ls -lh private-key.pem 
 
-      - name: Test SSH Connection
+      - name: Test SSH Connection to Local Server
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 "echo 'SSH connection successful'"
-      
-      - name: Download Build Files from S3
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes androidwrk@10.75.17.52 "echo 'SSH connection to local server successful'"
+
+      - name: Forward SSH Agent for EC2 Access
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
-            if ! aws s3 ls s3://piplineflow/build_${{ env.BUILD_NUMBER }}/; then
-              echo "Error: S3 bucket not found!"
-              exit 1
-            fi
-            aws s3 cp s3://piplineflow/build_${{ env.BUILD_NUMBER }}/ /opt/aosp_build/ --recursive
-            echo "Files downloaded to local server!"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no androidwrk@10.75.17.52 << "EOF"
+            ssh -i ~/.ssh/aws_private_key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 "echo 'EC2 SSH connection successful'"
           EOF
-  
-      - name: Install Dependencies
+
+      - name: Download Build Files from S3 (From EC2)
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 << "EOF"
-            sudo apt update
-            if ! command -v python3 &>/dev/null; then sudo apt install -y python3; fi
-            if ! command -v pip &>/dev/null; then sudo apt install -y python3-pip; fi
-            echo "Python dependencies installed!"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no androidwrk@10.75.17.52 << "EOF"
+            ssh -i ~/.ssh/aws_private_key.pem abhimanyu-s@10.75.17.52 << "INNER_EOF"
+              if ! aws s3 ls s3://piplineflow/build_${{ env.BUILD_NUMBER }}/; then
+                echo "Error: S3 bucket not found!"
+                exit 1
+              fi
+              aws s3 cp s3://piplineflow/build_${{ env.BUILD_NUMBER }}/ /opt/aosp_build/ --recursive
+              echo "Files downloaded to local server!"
+            INNER_EOF
           EOF
-  
-      - name: Run ATS Test Script
+
+      - name: Install Dependencies & Run ATS Tests
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 << "EOF"
-            cd /home/abhimanyu-s/openapi/openapi_python
-            if [ ! -f kavya_runtestplan.py ]; then
-              echo "Error: ATS test script not found!"
-              exit 1
-            fi
-            python3 kavya_runtestplan.py || {
-              echo "Error: ATS test execution failed!"
-              exit 1
-            }
-            echo "ATS tests executed successfully!"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no androidwrk@10.75.17.52 << "EOF"
+            ssh -i ~/.ssh/aws_private_key.pem abhimanyu-s@10.75.17.52 << "INNER_EOF"
+              sudo apt update
+              if ! command -v python3 &>/dev/null; then sudo apt install -y python3; fi
+              if ! command -v pip &>/dev/null; then sudo apt install -y python3-pip; fi
+              echo "Python dependencies installed!"
+
+              cd /home/abhimanyu-s/openapi/openapi_python
+              if [ ! -f kavya_runtestplan.py ]; then
+                echo "Error: ATS test script not found!"
+                exit 1
+              fi
+              python3 kavya_runtestplan.py || {
+                echo "Error: ATS test execution failed!"
+                exit 1
+              }
+              echo "ATS tests executed successfully!"
+            INNER_EOF
           EOF
+
