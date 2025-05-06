@@ -5,7 +5,8 @@ on:
     branches:
       - main
   workflow_dispatch:
-
+permissions:
+  id-token: write
 jobs:
   setup_aosp:
     runs-on: ubuntu-latest
@@ -19,14 +20,20 @@ jobs:
         
       - name: Export Build Number
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
-
-      - name: Configure AWS Credentials
+      - name: configure aws credentials
         uses: aws-actions/configure-aws-credentials@v3
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          role-to-assume: arn:aws:iam::482037961672:role/GithubDeploymentRole
+          role-session-name: githubactionsession
           aws-region: eu-north-1
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      # - name: Configure AWS Credentials
+      #   uses: aws-actions/configure-aws-credentials@v3
+      #   with:
+      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      #     aws-region: eu-north-1
+      #     aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
 
       - name: Launch EC2 Instance
         id: set_instance
