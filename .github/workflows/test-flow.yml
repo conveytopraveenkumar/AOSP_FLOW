@@ -175,7 +175,7 @@ jobs:
               rm -rf /workspace/.repo &&
               mkdir -p /workspace/logs
               echo 'Initializing repo...'
-              repo init -u https://android.googlesource.com/platform/manifest -b android-14.0.0_r45
+              repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19
               echo 'Syncing repo...'
                for i in {1..3}; do
                 repo sync -c -j$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log && break || sleep 10
@@ -224,10 +224,10 @@ jobs:
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
             docker exec aosp-container bash -c "
-              export AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'
-              export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
-              export AWS_SESSION_TOKEN='${{ secrets.AWS_SESSION_TOKEN }}'
-              export AWS_DEFAULT_REGION='eu-north-1'
+              # export AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'
+              # export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+              # export AWS_SESSION_TOKEN='${{ secrets.AWS_SESSION_TOKEN }}'
+              # export AWS_DEFAULT_REGION='eu-north-1'
       
               # Ensure BUILD_NUMBER is correctly passed
               BUILD_NUMBER=${{ env.BUILD_NUMBER }}
