@@ -277,30 +277,47 @@ jobs:
     needs: build_aosp  
     runs-on: ubuntu-latest
     steps:
-        - name: Connect to Local Server
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
-              echo "Connected to local server successfully!"
-            EOF
+      - name: Configure SSH Key for EC2 Access
+        run: |
+          echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
+          chmod 600 private-key.pem
+          ls -lh private-key.pem 
+
+      - name: Test SSH Connection
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 "echo 'SSH connection successful'"
+      
+      - name: Download Build Files from S3
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
+            if ! aws s3 ls s3://piplineflow/build_${{ env.BUILD_NUMBER }}/; then
+              echo "Error: S3 bucket not found!"
+              exit 1
+            fi
+            aws s3 cp s3://piplineflow/build_${{ env.BUILD_NUMBER }}/ /opt/aosp_build/ --recursive
+            echo "Files downloaded to local server!"
+          EOF
   
-        - name: Download Build Files from S3
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
-              aws s3 cp s3://piplineflow/build_${{ env.BUILD_NUMBER }}/ /opt/aosp_build/ --recursive
-              echo "Files downloaded to local server!"
-            EOF
+      - name: Install Dependencies
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 << "EOF"
+            sudo apt update
+            if ! command -v python3 &>/dev/null; then sudo apt install -y python3; fi
+            if ! command -v pip &>/dev/null; then sudo apt install -y python3-pip; fi
+            echo "Python dependencies installed!"
+          EOF
   
-        - name: Install Dependencies
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
-              sudo apt update && sudo apt install -y python3 pip
-              echo "Python dependencies installed!"
-            EOF
-  
-        - name: Run ATS Test Script
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no abhimanyu-s@10.75.17.52 << "EOF"
-              cd /home/abhimanyu-s/openapi/openapi_python
-              python3 kavya_runtestplan.py
-              echo "ATS tests executed!"
-            EOF
+      - name: Run ATS Test Script
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes abhimanyu-s@10.75.17.52 << "EOF"
+            cd /home/abhimanyu-s/openapi/openapi_python
+            if [ ! -f kavya_runtestplan.py ]; then
+              echo "Error: ATS test script not found!"
+              exit 1
+            fi
+            python3 kavya_runtestplan.py || {
+              echo "Error: ATS test execution failed!"
+              exit 1
+            }
+            echo "ATS tests executed successfully!"
+          EOF
