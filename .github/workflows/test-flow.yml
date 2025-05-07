@@ -19,9 +19,8 @@ jobs:
         run: |
             export AWS_ROLE_ARN="arn:aws:iam::482037961672:role/GithubDeploymentRole"
             export AWS_REGION="eu-north-1"
-            export AWS_WEB_IDENTITY_TOKEN_FILE="/token"
-            aws sts assume-role-with-web-identity --role-arn $AWS_ROLE_ARN --role-session-name githubactionsession --web-identity-token $(cat $AWS_WEB_IDENTITY_TOKEN_FILE)
-
+            #export AWS_WEB_IDENTITY_TOKEN_FILE="/token"
+            aws sts assume-role-with-web-identity --role-arn $AWS_ROLE_ARN --role-session-name githubactionsession
       - name: Launch EC2 Instance
         id: set_instance
         run: |
