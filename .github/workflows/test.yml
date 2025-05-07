@@ -1,54 +1,67 @@
-name: Create and Connect to AWS EC2
- 
+name: AOSP Build on EC2 with Docker JOBS
+
 on:
   push:
     branches:
       - main
   workflow_dispatch:
- 
+
 jobs:
-  create-and-connect:
+  setup_aosp:
     runs-on: ubuntu-latest
+    timeout-minutes: 720
+    outputs:
+      instance_ip: ${{ env.INSTANCE_IP }}
+      instance_id: ${{ env.INSTANCE_ID }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
- 
-      # - name: Install AWS CLI
-      #   run: |
-      #     sudo apt update
-      #     sudo apt install awscli -y
- 
-      - name: Configure AWS Credentials
+      # - name: Checkout Repository
+      #   uses: actions/checkout@v3
+
+      - name: Export Build Number
+        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
+
+      - name: Configure AWS Credentials Manually
         run: |
-          export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
-          export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          export AWS_REGION=eu-north-1
- 
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region eu-north-1
+
+      - name: Validate AWS Authentication
+        run: |
+          aws sts get-caller-identity
+
       - name: Launch EC2 Instance
+        id: set_instance
         run: |
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
-              --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
-              --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text \
-              --region eu-north-1)
+            --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+            --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
+          SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
+          SG_ID=$(aws ec2 describe-security-groups --query 'SecurityGroups[0].GroupId' --output text)
+          INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
+            --count 1 --instance-type c5.4xlarge \
+            --key-name praveenkeyAWS \
+            --security-group-ids $SG_ID \
+            --subnet-id $SUBNET_ID \
+            --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
+            --query "Instances[0].InstanceId" --output text)
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          INSTANCE_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
+          echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
 
-          SUBNET_ID=$(aws ec2 describe-subnets --region eu-north-1 --query 'Subnets[0].SubnetId' --output text)
-          SG_ID=$(aws ec2 describe-security-groups --region eu-north-1 --query 'SecurityGroups[0].GroupId' --output text)
-          INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID --count 1 --instance-type t2.micro --key-name praveenkeyAWS --security-groups $SG_ID --query "Instances[0].InstanceId" --output text)
-          echo "Instance ID: $INSTANCE_ID"
- 
-      - name: Get EC2 Public IP
+      - name: Wait for EC2 Instance to Start
+        run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
+
+      - name: Ensure EC2 Instance Is Fully Initialized
         run: |
-          PUBLIC_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
-          echo "EC2 Public IP: $PUBLIC_IP"
-          echo "PUBLIC_IP=$PUBLIC_IP" >> $GITHUB_ENV
- 
-      - name: Set up SSH Connection
-        run: |
-          mkdir -p ~/.ssh
-          echo "${{ secrets.EC2_SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
-          chmod 600 ~/.ssh/id_rsa
-          ssh-keyscan -H $PUBLIC_IP >> ~/.ssh/known_hosts
- 
-      - name: Connect to EC2 and Run Command
-        run: |
-          ssh -i ~/.ssh/id_rsa ubuntu@$PUBLIC_IP "ls -l"
+          while true; do
+            INSTANCE_STATE=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceState.Name" --output text)
+            SYSTEM_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].SystemStatus.Status" --output text)
+            INSTANCE_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceStatus.Status" --output text)
+            echo "Current State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
+            if [[ "$INSTANCE_STATE" == "running" && "$SYSTEM_STATUS" == "ok" && "$INSTANCE_STATUS" == "ok" ]]; then
+              echo "Instance is fully initialized!"
+              break
+            fi
+            sleep 10
+          done
