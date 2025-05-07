@@ -29,10 +29,10 @@ jobs:
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
               --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
               --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text \
-              --region $AWS_REGION)
+              --region eu-north-1)
 
-          SUBNET_ID=$(aws ec2 describe-subnets --region $AWS_REGION --query 'Subnets[0].SubnetId' --output text)
-          SG_ID=$(aws ec2 describe-security-groups --region $AWS_REGION --query 'SecurityGroups[0].GroupId' --output text)
+          SUBNET_ID=$(aws ec2 describe-subnets --region eu-north-1 --query 'Subnets[0].SubnetId' --output text)
+          SG_ID=$(aws ec2 describe-security-groups --region eu-north-1 --query 'SecurityGroups[0].GroupId' --output text)
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID --count 1 --instance-type t2.micro --key-name praveenkeyAWS --security-groups $SG_ID --query "Instances[0].InstanceId" --output text)
           echo "Instance ID: $INSTANCE_ID"
  
