@@ -222,7 +222,7 @@ jobs:
       
       - name: Upload Build Files to S3 with Build Number
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ env.INSTANCE_IP }} << "EOF"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
             docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
                         -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
                         -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
@@ -245,7 +245,7 @@ jobs:
       
       - name: Stop EC2 Instance After Build Completion
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ env.INSTANCE_IP }} << "EOF"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
             docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
                         -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
                         -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
