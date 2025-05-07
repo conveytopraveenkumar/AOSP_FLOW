@@ -15,25 +15,12 @@ jobs:
       instance_ip: ${{ env.INSTANCE_IP }}
       instance_id: ${{ env.INSTANCE_ID }}
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v3
-        
-      - name: Export Build Number
-        run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
-      - name: configure aws credentials
-        uses: aws-actions/configure-aws-credentials@v3
-        with:
-          role-to-assume: arn:aws:iam::482037961672:role/GithubDeploymentRole
-          role-session-name: githubactionsession
-          aws-region: eu-north-1
-
-      # - name: Configure AWS Credentials
-      #   uses: aws-actions/configure-aws-credentials@v3
-      #   with:
-      #     aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-      #     aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-      #     aws-region: eu-north-1
-      #     aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
+      - name: Configure AWS Credentials via OIDC
+        run: |
+            export AWS_ROLE_ARN="arn:aws:iam::482037961672:role/GithubDeploymentRole"
+            export AWS_REGION="eu-north-1"
+            export AWS_WEB_IDENTITY_TOKEN_FILE="/token"
+            aws sts assume-role-with-web-identity --role-arn $AWS_ROLE_ARN --role-session-name githubactionsession --web-identity-token $(cat $AWS_WEB_IDENTITY_TOKEN_FILE)
 
       - name: Launch EC2 Instance
         id: set_instance
