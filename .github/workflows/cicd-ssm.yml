@@ -29,9 +29,11 @@ jobs:
       - name: Launch EC2 Instance with IAM Profile
         id: set_instance
         run: |
+          INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"  # Generates a timestamped name
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
             --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
             --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
+          
           SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
             --count 1 --instance-type c5.4xlarge \
@@ -40,26 +42,26 @@ jobs:
             --subnet-id $SUBNET_ID \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
             --iam-instance-profile Name="GithubDeploymentRole" \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
             --query "Instances[0].InstanceId" --output text)
+
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_ENV
 
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
 
-      - name: Ensure EC2 Instance Is Fully Initialized Using SSM
+      - name: Ensure EC2 Instance Is Fully Initialized
         run: |
-          echo "Checking if instance is fully initialized..."
           while true; do
-            STATUS=$(aws ssm describe-instance-information --query "InstanceInformationList[?InstanceId=='${{ env.INSTANCE_ID }}'].PingStatus" --output text)
-            
-            echo "Current Initialization Status: $STATUS"
-
-            if [[ "$STATUS" == "Online" ]]; then
-              echo "✅ Instance is fully initialized!"
+            INSTANCE_STATE=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceState.Name" --output text)
+            SYSTEM_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].SystemStatus.Status" --output text)
+            INSTANCE_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceStatus.Status" --output text)
+            echo "Current State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
+            if [[ "$INSTANCE_STATE" == "running" && "$SYSTEM_STATUS" == "ok" && "$INSTANCE_STATUS" == "ok" ]]; then
+              echo "Instance is fully initialized!"
               break
             fi
-
-            echo "⏳ Waiting for instance to fully initialize..."
             sleep 10
           done
 
