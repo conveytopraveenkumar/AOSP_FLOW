@@ -26,21 +26,22 @@ jobs:
       - name: Validate AWS Authentication
         run: aws sts get-caller-identity
 
-      - name: Launch EC2 Instance with IAM Profile 
+      - name: Launch EC2 Instance with IAM Profile
         id: set_instance
         run: |
-          INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"
+          INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"  # Generate dynamic name
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
-            --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
-            --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)      
+              --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+              --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
+      
           SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
-          
+      
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
               --count 1 --instance-type c5.4xlarge \
               --key-name praveenkeyAWS \
               --security-group-ids sg-0b717514e2fcd22ce \
               --subnet-id $SUBNET_ID \
-              --block-device-mappings '[{\"DeviceName\": \"/dev/sda1\", \"Ebs\": {\"VolumeSize\": 500, \"DeleteOnTermination\": true}}]'
+              --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
               --iam-instance-profile Name="GithubDeploymentRole" \
               --user-data "#!/bin/bash
                   sudo apt update && sudo apt install -y amazon-ssm-agent
@@ -50,11 +51,15 @@ jobs:
                   sudo cloud-init restart" \
               --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
               --query "Instances[0].InstanceId" --output text)
-          
-            echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-            echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_ENV
-
-
+      
+          if [[ -z "$INSTANCE_ID" ]]; then
+              echo "❌ Error: Instance launch failed!"
+              exit 1
+          fi
+      
+          echo "✅ Instance launched successfully! ID: $INSTANCE_ID | Name: $INSTANCE_NAME"
+          echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
+          echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_ENV
 
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
