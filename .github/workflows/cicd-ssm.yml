@@ -24,10 +24,9 @@ jobs:
           aws configure set region eu-north-1
 
       - name: Validate AWS Authentication
-        run: |
-          aws sts get-caller-identity
+        run: aws sts get-caller-identity
 
-      - name: Launch EC2 Instance
+      - name: Launch EC2 Instance with IAM Profile
         id: set_instance
         run: |
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
@@ -40,29 +39,35 @@ jobs:
             --security-group-ids sg-0b717514e2fcd22ce \
             --subnet-id $SUBNET_ID \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
+            --iam-instance-profile Name="GithubDeploymentRole" \
             --query "Instances[0].InstanceId" --output text)
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          INSTANCE_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
-          echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
 
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
 
-      - name: Validate IAM Role Association
+      - name: Ensure EC2 Instance Is Fully Initialized Using SSM
         run: |
-          IAM_PROFILE=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].IamInstanceProfile.Arn" --output text)
-          if [[ "$IAM_PROFILE" == *"GithubDeploymentRole"* ]]; then
-            echo "✅ IAM Role GithubDeploymentRole is already attached."
-          else
-            echo "❌ IAM Role not attached! Associating now..."
-            aws ec2 associate-iam-instance-profile --instance-id $INSTANCE_ID --iam-instance-profile Name="GithubDeploymentRole"
-          fi
+          echo "Checking if instance is fully initialized..."
+          while true; do
+            STATUS=$(aws ssm describe-instance-information --query "InstanceInformationList[?InstanceId=='${{ env.INSTANCE_ID }}'].PingStatus" --output text)
+            
+            echo "Current Initialization Status: $STATUS"
+
+            if [[ "$STATUS" == "Online" ]]; then
+              echo "✅ Instance is fully initialized!"
+              break
+            fi
+
+            echo "⏳ Waiting for instance to fully initialize..."
+            sleep 10
+          done
 
       - name: Configure Swap Space Using SSM
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"instance-id","Values":["${{ env.INSTANCE_ID }}"]}]' \
+            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
             --parameters '{"commands":["sudo fallocate -l 64G /swapfile", "sudo chmod 600 /swapfile", "sudo mkswap /swapfile", "sudo swapon /swapfile", "echo \"/swapfile swap swap defaults 0 0\" | sudo tee -a /etc/fstab", "sudo sysctl vm.swappiness=10", "echo \"vm.swappiness=10\" | sudo tee -a /etc/sysctl.conf"]}' \
             --region eu-north-1
 
@@ -70,7 +75,7 @@ jobs:
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"instance-id","Values":["${{ env.INSTANCE_ID }}"]}]' \
+            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
             --parameters '{"commands":["sudo apt update && sudo apt install -y docker.io", "sudo usermod -aG docker ubuntu", "sudo systemctl restart docker"]}' \
             --region eu-north-1
 
@@ -78,7 +83,7 @@ jobs:
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"instance-id","Values":["${{ env.INSTANCE_ID }}"]}]' \
+            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
             --parameters '{"commands":["echo \"${{ secrets.GHCR_PAT }}\" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin"]}' \
             --region eu-north-1
 
@@ -86,6 +91,6 @@ jobs:
         run: |
           aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"instance-id","Values":["${{ env.INSTANCE_ID }}"]}]' \
+            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
             --parameters '{"commands":["mkdir -p /workspace/logs", "echo \"Initializing repo...\"", "repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19", "echo \"Syncing repo...\"", "repo sync -c -j$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log"]}' \
             --region eu-north-1
