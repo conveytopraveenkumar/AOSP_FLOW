@@ -36,7 +36,7 @@ jobs:
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
             --count 1 --instance-type c5.4xlarge \
             --key-name praveenkeyAWS \
-            --security-group-ids sg-0374a1b47b874983d \
+            --security-group-ids sg-0b717514e2fcd22ce \
             --subnet-id $SUBNET_ID \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
             --query "Instances[0].InstanceId" --output text)
