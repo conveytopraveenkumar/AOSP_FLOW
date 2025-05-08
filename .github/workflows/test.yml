@@ -68,7 +68,7 @@ jobs:
           chmod 600 private-key.pem
       - name: Configure Swap Space
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${INSTANCE_IP} << "EOF"
             sudo fallocate -l 64G /swapfile
             sudo chmod 600 /swapfile
             sudo mkswap /swapfile
@@ -79,14 +79,14 @@ jobs:
           EOF
       - name: Install Docker on EC2
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${INSTANCE_IP} << "EOF"
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${INSTANCE_IP} << "EOF"
             sudo apt update && sudo apt install -y docker.io
             sudo usermod -aG docker ubuntu
             sudo systemctl restart docker
           EOF
       - name: Authenticate with GitHub Container Registry
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << EOF
             echo "${{ secrets.GHCR_PAT   }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
           EOF
       - name: Authenticate with GitHub Container Registry
@@ -94,7 +94,7 @@ jobs:
           echo "${{ secrets.GHCR_PAT   }}" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin
       - name: Check and Use Prebuilt Docker Image
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << 'EOF'
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text) << 'EOF'
             set -e  # Stop execution on failure
             echo "Checking if Docker image exists in GHCR..."
             
