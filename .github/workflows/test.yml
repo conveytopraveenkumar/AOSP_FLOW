@@ -198,56 +198,55 @@ jobs:
       
       - name: Upload Build Files to S3 with Build Number
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << EOF
-            docker exec -e AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}" \
-                        -e AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}" \
-                        -e AWS_SESSION_TOKEN="${{ secrets.AWS_SESSION_TOKEN }}" \
-                        -e AWS_DEFAULT_REGION="eu-north-1" \
-                        -e BUILD_NUMBER="${{ env.BUILD_NUMBER }}" \
-                        aosp-container bash -c "
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+            docker exec aosp-container bash -c "
+              export AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'
+              export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+              export AWS_DEFAULT_REGION='eu-north-1'
+      
+              # Ensure BUILD_NUMBER is correctly passed
+              BUILD_NUMBER=${{ env.BUILD_NUMBER }}
+              export BUILD_NUMBER
+              echo 'Build Number inside Docker:' \$BUILD_NUMBER
+      
+              # Debugging Step: Check if AWS CLI is properly configured inside Docker
+              aws configure list
+              aws configure set region eu-north-1
+      
               cd /workspace/out/dist/
-      
-              # Validate S3 bucket access before uploading
-              if ! aws s3 ls s3://piplineflow/; then
-                echo '❌ Error: S3 bucket access failed!'
-                exit 1
-              fi
-      
-              # Upload files securely
-              aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/ || { echo '❌ Error uploading cvd-host_package.tar.gz'; exit 1; }
-              aws s3 cp aosp_cf_x86_64_tv-img-eng* s3://piplineflow/build_\$BUILD_NUMBER/ || { echo '❌ Error uploading aosp_cf_x86_64_tv-img-eng*'; exit 1; }
-      
-              echo '✅ Build files uploaded to S3 under folder build_\$BUILD_NUMBER!'
+              aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
+              aws s3 cp aosp_cf_x86_64_tv-img-eng* s3://piplineflow/build_\$BUILD_NUMBER/
+              echo 'Build files uploaded to S3 under folder build_\$BUILD_NUMBER!'
             "
           EOF
       
    
       - name: Stop EC2 Instance After Build Completion
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << EOF
-            INSTANCE_ID=${{ needs.setup_aosp.outputs.instance_id }}
+          ssh -i private-key.pem -o StrictHostKeyChecking=no ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+            docker exec aosp-container bash -c "
+              export AWS_ACCESS_KEY_ID='${{ secrets.AWS_ACCESS_KEY_ID }}'
+              export AWS_SECRET_ACCESS_KEY='${{ secrets.AWS_SECRET_ACCESS_KEY }}'
+              export AWS_DEFAULT_REGION='eu-north-1'
+              INSTANCE_ID=${{ needs.setup_aosp.outputs.instance_id }}
       
-            if [ -z "$INSTANCE_ID" ]; then
-              echo "❌ Error: INSTANCE_ID is empty!"
-              exit 1
-            fi
+              # Ensure INSTANCE_ID is set before proceeding
+              if [ -z \"\$INSTANCE_ID\" ]; then
+                echo 'Error: INSTANCE_ID is empty!'
+                exit 1
+              fi
       
-            # Install AWS CLI if missing
-            if ! command -v aws >/dev/null 2>&1; then
-              sudo apt update && sudo apt install -y awscli
-            fi
+              # Debugging Step: Print instance details before stopping
+              echo 'Attempting to stop EC2 instance ID:' \$INSTANCE_ID
       
-            # Configure AWS credentials manually
-            aws configure set aws_access_key_id "${{ secrets.AWS_ACCESS_KEY_ID }}"
-            aws configure set aws_secret_access_key "${{ secrets.AWS_SECRET_ACCESS_KEY }}"
-            aws configure set region "eu-north-1"
+              # Prevent immediate SSH disconnects and add logging
+              echo 'Waiting for a few seconds before stopping instance...'
+              sleep 5
       
-            # Verify AWS authentication before stopping the instance
-            aws sts get-caller-identity || { echo '❌ Error: AWS authentication failed!'; exit 1; }
+              # Stop EC2 instance with error handling
+              nohup aws ec2 stop-instances --instance-ids \$INSTANCE_ID > stop_log.txt 2>&1 &
+              aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
       
-            # Stop and confirm EC2 shutdown
-            aws ec2 stop-instances --instance-ids "$INSTANCE_ID"
-            aws ec2 wait instance-stopped --instance-ids "$INSTANCE_ID"
-      
-            echo "✅ Instance $INSTANCE_ID has been successfully stopped!"
+              echo 'Instance \$INSTANCE_ID has been successfully stopped.'
+            "
           EOF
