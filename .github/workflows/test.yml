@@ -9,7 +9,7 @@ on:
 jobs:
   setup_aosp:
     runs-on: ubuntu-latest
-    timeout-minutes: 720
+    timeout-minutes: 660
     outputs:
       instance_ip: ${{ env.INSTANCE_IP }}
       instance_id: ${{ env.INSTANCE_ID }}
