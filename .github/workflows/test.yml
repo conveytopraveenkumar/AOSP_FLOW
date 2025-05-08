@@ -35,6 +35,11 @@ jobs:
             --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
           SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
           SG_ID=$(aws ec2 describe-security-groups --query 'SecurityGroups[0].GroupId' --output text)
+          
+          # Authorize SSH inbound rule
+          aws ec2 authorize-security-group-ingress --group-id $SG_ID --protocol tcp --port 22 --cidr 0.0.0.0/0
+          
+          # Launch the EC2 Instance
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
             --count 1 --instance-type c5.4xlarge \
             --key-name praveenkeyAWS \
@@ -42,9 +47,19 @@ jobs:
             --subnet-id $SUBNET_ID \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
             --query "Instances[0].InstanceId" --output text)
+          
+          # Store instance details in environment variables
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
           INSTANCE_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
           echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
+          
+          # Display instance details
+          echo "EC2 Instance Launched: $INSTANCE_ID"
+          echo "Public IP: $INSTANCE_IP"
+          
+          # SSH Instructions
+          echo "To connect: ssh -i praveenkeyAWS.pem ubuntu@$INSTANCE_IP"
+
 
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
