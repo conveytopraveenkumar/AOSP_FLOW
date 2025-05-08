@@ -65,6 +65,14 @@ jobs:
             sleep 10
           done
 
+      - name: Install & Enable AWS SSM Agent
+        run: |
+          aws ssm send-command \
+            --document-name "AWS-RunShellScript" \
+            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
+            --parameters '{"commands":["sudo apt update", "sudo apt install -y amazon-ssm-agent", "sudo systemctl enable amazon-ssm-agent", "sudo systemctl restart amazon-ssm-agent", "systemctl is-active amazon-ssm-agent"]}' \
+            --region eu-north-1
+
       - name: Configure Swap Space Using SSM
         run: |
           aws ssm send-command \
