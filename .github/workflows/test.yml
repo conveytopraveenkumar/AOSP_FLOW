@@ -55,13 +55,19 @@ jobs:
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
 
-      - name: Assign Elastic IP (Fix missing public IP issue)
-        id: set_elastic_ip
+      - name: Ensure EC2 Instance Is Fully Initialized
         run: |
-          ALLOCATION_ID=$(aws ec2 allocate-address --query "AllocationId" --output text)
-          aws ec2 associate-address --instance-id $INSTANCE_ID --allocation-id $ALLOCATION_ID
-          INSTANCE_IP=$(aws ec2 describe-instances --instance-ids $INSTANCE_ID --query "Reservations[0].Instances[0].PublicIpAddress" --output text)
-          echo "INSTANCE_IP=$INSTANCE_IP" >> $GITHUB_ENV
+          while true; do
+            INSTANCE_STATE=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceState.Name" --output text)
+            SYSTEM_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].SystemStatus.Status" --output text)
+            INSTANCE_STATUS=$(aws ec2 describe-instance-status --instance-ids $INSTANCE_ID --query "InstanceStatuses[0].InstanceStatus.Status" --output text)
+            echo "Current State: $INSTANCE_STATE | System Status: $SYSTEM_STATUS | Instance Status: $INSTANCE_STATUS"
+            if [[ "$INSTANCE_STATE" == "running" && "$SYSTEM_STATUS" == "ok" && "$INSTANCE_STATUS" == "ok" ]]; then
+              echo "Instance is fully initialized!"
+              break
+            fi
+            sleep 10
+          done
 
       - name: Ensure SSH Connectivity Before Swap Setup
         run: |
