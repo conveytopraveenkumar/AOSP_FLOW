@@ -178,84 +178,152 @@ jobs:
               done
             "
           EOF
-        
-    build_aosp:
-      needs: setup_aosp
-      runs-on: ubuntu-latest
-      timeout-minutes: 720
-      steps:
-        - name: Configure SSH Key for EC2 Access
-          run: |
-            echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
-            chmod 600 private-key.pem
-    
-        - name: Set Up Environment & Build AOSP
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
-              docker exec aosp-container bash -c "
-                if [ ! -d /workspace/.repo ]; then
-                  echo 'Error: Repo sync may have failed. .repo directory not found.'
+      - name: Set Up Environment & Build AOSP
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${INSTANCE_IP} << "EOF"
+            docker exec aosp-container bash -c "
+              if [ ! -d /workspace/.repo ]; then
+                echo 'Error: Repo sync may have failed. .repo directory not found.'
+                exit 1
+              fi
+  
+              if [ -f build/envsetup.sh ]; then
+                source build/envsetup.sh
+                lunch aosp_cf_x86_64_tv-userdebug
+                make dist -j\$(nproc) 2>&1 | tee /workspace/logs/build.log || {
+                  echo 'Error: AOSP build failed!'
                   exit 1
-                fi
+                }
+              else
+                echo 'Error: build/envsetup.sh not found!'
+                exit 1
+              fi
+            "
+          EOF
     
-                if [ -f build/envsetup.sh ]; then
-                  source build/envsetup.sh
-                  lunch aosp_cf_x86_64_tv-userdebug
-                  make dist -j\$(nproc) 2>&1 | tee /workspace/logs/build.log || {
-                    echo 'Error: AOSP build failed!'
-                    exit 1
-                  }
-                else
-                  echo 'Error: build/envsetup.sh not found!'
-                  exit 1
-                fi
-              "
-            EOF
+      - name: Set Build Number
+        run: |
+          echo "BUILD_NUMBER=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+      
+      - name: Upload Build Files to S3 with Build Number
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP} << "EOF"
+            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+                        -e AWS_REGION=eu-north-1 \
+                        aosp-container bash -c "
+              export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
+              echo 'Build Number inside Docker:' \$BUILD_NUMBER
+      
+              # Verify credentials before proceeding
+              aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+      
+              # Upload files to S3
+              cd /workspace/out/dist/
+              aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
+              aws s3 cp aosp_cf_x86_64_tv-img-eng.root.zip s3://piplineflow/build_\$BUILD_NUMBER/
+      
+              echo 'Build files uploaded successfully to S3 under folder build_\$BUILD_NUMBER!'
+            "
+          EOF
+      
+      - name: Stop EC2 Instance After Build Completion
+        run: |
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP}} << "EOF"
+            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+                        -e AWS_REGION=eu-north-1 \
+                        aosp-container bash -c "
+              INSTANCE_ID=${{ env.INSTANCE_ID }}
+      
+              if [ -z \"\$INSTANCE_ID\" ]; then
+                echo 'Error: INSTANCE_ID is empty!'
+                exit 1
+              fi
+      
+              # Verify AWS authentication before stopping the instance
+              aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+      
+              aws ec2 stop-instances --instance-ids \$INSTANCE_ID
+              aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
+        
+    # build_aosp:
+    #   needs: setup_aosp
+    #   runs-on: ubuntu-latest
+    #   timeout-minutes: 720
+    #   steps:
+    #     - name: Configure SSH Key for EC2 Access
+    #       run: |
+    #         echo "${{ secrets.AWS_SSH_PRIVATE_KEY }}" > private-key.pem
+    #         chmod 600 private-key.pem
     
-        - name: Set Build Number
-          run: |
-            echo "BUILD_NUMBER=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
+    #     - name: Set Up Environment & Build AOSP
+    #       run: |
+    #         ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+    #           docker exec aosp-container bash -c "
+    #             if [ ! -d /workspace/.repo ]; then
+    #               echo 'Error: Repo sync may have failed. .repo directory not found.'
+    #               exit 1
+    #             fi
+    
+    #             if [ -f build/envsetup.sh ]; then
+    #               source build/envsetup.sh
+    #               lunch aosp_cf_x86_64_tv-userdebug
+    #               make dist -j\$(nproc) 2>&1 | tee /workspace/logs/build.log || {
+    #                 echo 'Error: AOSP build failed!'
+    #                 exit 1
+    #               }
+    #             else
+    #               echo 'Error: build/envsetup.sh not found!'
+    #               exit 1
+    #             fi
+    #           "
+    #         EOF
+    
+    #     - name: Set Build Number
+    #       run: |
+    #         echo "BUILD_NUMBER=$(date +%Y%m%d%H%M%S)" >> $GITHUB_ENV
         
-        - name: Upload Build Files to S3 with Build Number
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
-              docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-                          -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
-                          -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
-                          -e AWS_REGION=eu-north-1 \
-                          aosp-container bash -c "
-                export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
-                echo 'Build Number inside Docker:' \$BUILD_NUMBER
+    #     - name: Upload Build Files to S3 with Build Number
+    #       run: |
+    #         ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+    #           docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+    #                       -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+    #                       -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+    #                       -e AWS_REGION=eu-north-1 \
+    #                       aosp-container bash -c "
+    #             export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
+    #             echo 'Build Number inside Docker:' \$BUILD_NUMBER
         
-                # Verify credentials before proceeding
-                aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+    #             # Verify credentials before proceeding
+    #             aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
         
-                # Upload files to S3
-                cd /workspace/out/dist/
-                aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
-                aws s3 cp aosp_cf_x86_64_tv-img-eng.root.zip s3://piplineflow/build_\$BUILD_NUMBER/
+    #             # Upload files to S3
+    #             cd /workspace/out/dist/
+    #             aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
+    #             aws s3 cp aosp_cf_x86_64_tv-img-eng.root.zip s3://piplineflow/build_\$BUILD_NUMBER/
         
-                echo 'Build files uploaded successfully to S3 under folder build_\$BUILD_NUMBER!'
-              "
-            EOF
+    #             echo 'Build files uploaded successfully to S3 under folder build_\$BUILD_NUMBER!'
+    #           "
+    #         EOF
         
-        - name: Stop EC2 Instance After Build Completion
-          run: |
-            ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
-              docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-                          -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
-                          -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
-                          -e AWS_REGION=eu-north-1 \
-                          aosp-container bash -c "
-                INSTANCE_ID=${{ env.INSTANCE_ID }}
+    #     - name: Stop EC2 Instance After Build Completion
+    #       run: |
+    #         ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${{ needs.setup_aosp.outputs.instance_ip }} << "EOF"
+    #           docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
+    #                       -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+    #                       -e AWS_SESSION_TOKEN=${{ env.AWS_SESSION_TOKEN }} \
+    #                       -e AWS_REGION=eu-north-1 \
+    #                       aosp-container bash -c "
+    #             INSTANCE_ID=${{ env.INSTANCE_ID }}
         
-                if [ -z \"\$INSTANCE_ID\" ]; then
-                  echo 'Error: INSTANCE_ID is empty!'
-                  exit 1
-                fi
+    #             if [ -z \"\$INSTANCE_ID\" ]; then
+    #               echo 'Error: INSTANCE_ID is empty!'
+    #               exit 1
+    #             fi
         
-                # Verify AWS authentication before stopping the instance
-                aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
+    #             # Verify AWS authentication before stopping the instance
+    #             aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
         
-                aws ec2 stop-instances --instance-ids \$INSTANCE_ID
-                aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
+    #             aws ec2 stop-instances --instance-ids \$INSTANCE_ID
+    #             aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
