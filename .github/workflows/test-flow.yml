@@ -208,44 +208,59 @@ jobs:
       - name: Upload Build Files to S3 with Build Number
         run: |
           ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP} << "EOF"
-            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
-                        -e AWS_REGION=eu-north-1 \
-                        aosp-container bash -c "
+             docker exec aosp-container bash -c "
+              export AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }}
+              export AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+              export AWS_REGION=eu-north-1
               export BUILD_NUMBER=${{ env.BUILD_NUMBER }}
-              echo 'Build Number inside Docker:' \$BUILD_NUMBER
-      
-              # Verify credentials before proceeding
+              
+              aws configure set aws_access_key_id \$AWS_ACCESS_KEY_ID
+              aws configure set aws_secret_access_key \$AWS_SECRET_ACCESS_KEY
+              aws configure set region \$AWS_REGION
+              
+              # Verify AWS Authentication
               aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
-      
-              # Upload files to S3
+              
+              # Upload Build Files to S3
               cd /workspace/out/dist/
               aws s3 cp cvd-host_package.tar.gz s3://piplineflow/build_\$BUILD_NUMBER/
               aws s3 cp aosp_cf_x86_64_tv-img-eng.root.zip s3://piplineflow/build_\$BUILD_NUMBER/
-      
-              echo 'Build files uploaded successfully to S3 under folder build_\$BUILD_NUMBER!'
+        
+              echo 'Build files uploaded successfully!'
             "
           EOF
+
+
       
       - name: Stop EC2 Instance After Build Completion
         run: |
-          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP}} << "EOF"
-            docker exec -e AWS_ACCESS_KEY_ID=${{ env.AWS_ACCESS_KEY_ID }} \
-                        -e AWS_SECRET_ACCESS_KEY=${{ env.AWS_SECRET_ACCESS_KEY }} \
+          ssh -i private-key.pem -o StrictHostKeyChecking=no -o ServerAliveInterval=60 -o TCPKeepAlive=yes -o ConnectTimeout=30 ubuntu@${INSTANCE_IP} << "EOF"
+            docker exec -e AWS_ACCESS_KEY_ID=${{ secrets.AWS_ACCESS_KEY_ID }} \
+                        -e AWS_SECRET_ACCESS_KEY=${{ secrets.AWS_SECRET_ACCESS_KEY }} \
                         -e AWS_REGION=eu-north-1 \
+                        -e INSTANCE_ID=${{ env.INSTANCE_ID }} \
                         aosp-container bash -c "
-              INSTANCE_ID=${{ env.INSTANCE_ID }}
-      
               if [ -z \"\$INSTANCE_ID\" ]; then
                 echo 'Error: INSTANCE_ID is empty!'
                 exit 1
               fi
       
-              # Verify AWS authentication before stopping the instance
+              # Configure AWS Credentials inside Docker
+              aws configure set aws_access_key_id \$AWS_ACCESS_KEY_ID
+              aws configure set aws_secret_access_key \$AWS_SECRET_ACCESS_KEY
+              aws configure set region \$AWS_REGION
+      
+              # Verify AWS authentication
               aws sts get-caller-identity || { echo 'Error: AWS authentication failed!'; exit 1; }
       
+              # Stop EC2 instance
               aws ec2 stop-instances --instance-ids \$INSTANCE_ID
               aws ec2 wait instance-stopped --instance-ids \$INSTANCE_ID
+      
+              echo 'EC2 instance \$INSTANCE_ID has been successfully stopped!'
+            "
+          EOF
+
         
     # build_aosp:
     #   needs: setup_aosp
