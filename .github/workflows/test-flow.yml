@@ -250,7 +250,7 @@ build_aosp:
 
 
           
-  run_ats_tests:
+run_ats_tests:
     needs: build_aosp  
     runs-on: ubuntu-latest
     steps:
