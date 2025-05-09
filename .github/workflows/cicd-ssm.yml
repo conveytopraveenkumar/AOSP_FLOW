@@ -3,7 +3,7 @@ name: AOSP Build on EC2 with SSM
 on:
   push:
     branches:
-      - main
+      - test2
   workflow_dispatch:
 
 jobs:
