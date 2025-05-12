@@ -27,7 +27,7 @@ jobs:
       - name: Validate AWS Authentication
         run: aws sts get-caller-identity
 
-      - name: Launch EC2 Instance
+      - name: Launch EC2 Instance with IAM Role
         id: set_instance
         run: |
           INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"
@@ -40,6 +40,7 @@ jobs:
             --key-name praveenkeyAWS \
             --security-group-ids sg-0b717514e2fcd22ce \
             --subnet-id $SUBNET_ID \
+            --iam-instance-profile Name=GithubDeploymentRole \
             --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
             --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
             --query "Instances[0].InstanceId" --output text)
@@ -65,31 +66,31 @@ jobs:
       - name: Run Setup Commands via AWS SSM
         run: |
           COMMAND_ID=$(aws ssm send-command \
-          --document-name "AWS-RunShellScript" \
-          --targets '[{"Key":"instance-id","Values":["'"$INSTANCE_ID"'"]}]' \
-          --parameters '{"commands":[
-            "sudo apt update && sudo apt install -y git curl python3",
-            "sudo fallocate -l 64G /swapfile",
-            "sudo chmod 600 /swapfile",
-            "sudo mkswap /swapfile",
-            "sudo swapon /swapfile",
-            "echo \"/swapfile swap swap defaults 0 0\" | sudo tee -a /etc/fstab",
-            "sudo sysctl vm.swappiness=10",
-            "echo \"vm.swappiness=10\" | sudo tee -a /etc/sysctl.conf",
-            "mkdir -p ~/bin",
-            "curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo",
-            "chmod a+x ~/bin/repo",
-            "echo \"export PATH=~/bin:$PATH\" >> ~/.bashrc",
-            "source ~/.bashrc",
-            "sudo mkdir -p /home/ubuntu/AOSP/logs",
-            "sudo chmod -R 777 /home/ubuntu/AOSP",
-            "sudo touch /home/ubuntu/AOSP/logs/repo_sync.log",
-            "cd /home/ubuntu/AOSP",
-            "repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19",
-            "repo sync -c -j$(nproc)"
-          ]}' \
-          --region eu-north-1 \
-          --query "Command.CommandId" --output text)
+            --document-name "AWS-RunShellScript" \
+            --targets '[{"Key":"InstanceIds","Values":["'"$INSTANCE_ID"'"]}]' \
+            --parameters '{"commands":[
+              "sudo apt update && sudo apt install -y git curl python3",
+              "sudo fallocate -l 64G /swapfile",
+              "sudo chmod 600 /swapfile",
+              "sudo mkswap /swapfile",
+              "sudo swapon /swapfile",
+              "echo \"/swapfile swap swap defaults 0 0\" | sudo tee -a /etc/fstab",
+              "sudo sysctl vm.swappiness=10",
+              "echo \"vm.swappiness=10\" | sudo tee -a /etc/sysctl.conf",
+              "mkdir -p ~/bin",
+              "curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo",
+              "chmod a+x ~/bin/repo",
+              "echo \"export PATH=~/bin:$PATH\" >> ~/.bashrc",
+              "source ~/.bashrc",
+              "sudo mkdir -p /home/ubuntu/AOSP/logs",
+              "sudo chmod -R 777 /home/ubuntu/AOSP",
+              "sudo touch /home/ubuntu/AOSP/logs/repo_sync.log",
+              "cd /home/ubuntu/AOSP",
+              "repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19",
+              "repo sync -c -j$(nproc)"
+            ]}' \
+            --region eu-north-1 \
+            --query "Command.CommandId" --output text)
           echo "SSM COMMAND_ID=$COMMAND_ID"
 
       - name: Wait for SSM Command Completion
