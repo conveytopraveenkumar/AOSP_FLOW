@@ -3,7 +3,7 @@ name: AMINO CICD WORKFLOW
 on:
   push:
     branches:
-      - main
+      - dev2
   workflow_dispatch:
 
 permissions:
