@@ -1,18 +1,19 @@
-name: AOSP Build on EC2 with SSM
+name: AMINO CICD WORKFLOW
 
 on:
   push:
     branches:
-      - test2
+      - main
   workflow_dispatch:
 
+permissions:
+  id-token: write
+
 jobs:
-  setup_aosp:
+  Environment_to_launch_setup:
     runs-on: ubuntu-latest
     timeout-minutes: 720
-    outputs:
-      instance_ip: ${{ env.INSTANCE_IP }}
-      instance_id: ${{ env.INSTANCE_ID }}
+
     steps:
       - name: Export Build Number
         run: echo "BUILD_NUMBER=${{ github.run_number }}" >> $GITHUB_ENV
@@ -26,40 +27,23 @@ jobs:
       - name: Validate AWS Authentication
         run: aws sts get-caller-identity
 
-      - name: Launch EC2 Instance with IAM Profile
+      - name: Launch EC2 Instance
         id: set_instance
         run: |
-          INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"  # Generate dynamic name
+          INSTANCE_NAME="AOSP-Build-Instance-$(date +%Y%m%d%H%M%S)"
           UBUNTU_AMI_ID=$(aws ec2 describe-images --owners 099720109477 \
-              --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
-              --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
-      
+            --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-focal-20.04-amd64-server-*" \
+            --query 'Images | sort_by(@, &CreationDate)[-1].ImageId' --output text)
           SUBNET_ID=$(aws ec2 describe-subnets --query 'Subnets[0].SubnetId' --output text)
-      
           INSTANCE_ID=$(aws ec2 run-instances --image-id $UBUNTU_AMI_ID \
-              --count 1 --instance-type c5.4xlarge \
-              --key-name praveenkeyAWS \
-              --security-group-ids sg-0b717514e2fcd22ce \
-              --subnet-id $SUBNET_ID \
-              --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
-              --iam-instance-profile Name="GithubDeploymentRole" \
-              --user-data "#!/bin/bash
-                  sudo apt update && sudo apt install -y amazon-ssm-agent
-                  sudo systemctl enable amazon-ssm-agent
-                  sudo systemctl restart amazon-ssm-agent
-                  sudo cloud-init status --wait
-                  sudo cloud-init restart" \
-              --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
-              --query "Instances[0].InstanceId" --output text)
-      
-          if [[ -z "$INSTANCE_ID" ]]; then
-              echo "❌ Error: Instance launch failed!"
-              exit 1
-          fi
-      
-          echo "✅ Instance launched successfully! ID: $INSTANCE_ID | Name: $INSTANCE_NAME"
+            --count 1 --instance-type c5.4xlarge \
+            --key-name praveenkeyAWS \
+            --security-group-ids sg-0b717514e2fcd22ce \
+            --subnet-id $SUBNET_ID \
+            --block-device-mappings '[{"DeviceName": "/dev/sda1", "Ebs": {"VolumeSize": 500, "DeleteOnTermination": true}}]' \
+            --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=$INSTANCE_NAME}]" \
+            --query "Instances[0].InstanceId" --output text)
           echo "INSTANCE_ID=$INSTANCE_ID" >> $GITHUB_ENV
-          echo "INSTANCE_NAME=$INSTANCE_NAME" >> $GITHUB_ENV
 
       - name: Wait for EC2 Instance to Start
         run: aws ec2 wait instance-running --instance-ids $INSTANCE_ID
@@ -78,34 +62,47 @@ jobs:
             sleep 10
           done
 
-      - name: Configure Swap Space Using SSM
+      - name: Run Setup Commands via AWS SSM
         run: |
-          aws ssm send-command \
+          COMMAND_ID=$(aws ssm send-command \
             --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
-            --parameters '{"commands":["sudo fallocate -l 64G /swapfile", "sudo chmod 600 /swapfile", "sudo mkswap /swapfile", "sudo swapon /swapfile", "echo \"/swapfile swap swap defaults 0 0\" | sudo tee -a /etc/fstab", "sudo sysctl vm.swappiness=10", "echo \"vm.swappiness=10\" | sudo tee -a /etc/sysctl.conf"]}' \
-            --region eu-north-1
+            --targets '[{"Key":"instance-id","Values":["${INSTANCE_ID}"]}]' \
+            --parameters '{"commands":[
+              "sudo apt update && sudo apt install -y git curl python3",
+              "sudo fallocate -l 64G /swapfile",
+              "sudo chmod 600 /swapfile",
+              "sudo mkswap /swapfile",
+              "sudo swapon /swapfile",
+              "echo '/swapfile swap swap defaults 0 0' | sudo tee -a /etc/fstab",
+              "sudo sysctl vm.swappiness=10",
+              "echo 'vm.swappiness=10' | sudo tee -a /etc/sysctl.conf",
+              "mkdir -p ~/bin",
+              "curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo",
+              "chmod a+x ~/bin/repo",
+              "echo 'export PATH=~/bin:$PATH' >> ~/.bashrc",
+              "source ~/.bashrc",
+              "sudo mkdir -p /home/ubuntu/AOSP/logs",
+              "sudo chmod -R 777 /home/ubuntu/AOSP",
+              "sudo touch /home/ubuntu/AOSP/logs/repo_sync.log",
+              "cd /home/ubuntu/AOSP",
+              "repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19",
+              "repo sync -c -j$(nproc)"
+            ]}' \
+            --region eu-north-1 \
+            --query "Command.CommandId" --output text)
+          echo "SSM COMMAND_ID=$COMMAND_ID"
 
-      - name: Install Docker Using SSM
+      - name: Wait for SSM Command Completion
         run: |
-          aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
-            --parameters '{"commands":["sudo apt update && sudo apt install -y docker.io", "sudo usermod -aG docker ubuntu", "sudo systemctl restart docker"]}' \
-            --region eu-north-1
-
-      - name: Authenticate with GitHub Container Registry
-        run: |
-          aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
-            --parameters '{"commands":["echo \"${{ secrets.GHCR_PAT }}\" | docker login ghcr.io -u $GITHUB_ACTOR --password-stdin"]}' \
-            --region eu-north-1
-
-      - name: Repo Init & Sync Using SSM
-        run: |
-          aws ssm send-command \
-            --document-name "AWS-RunShellScript" \
-            --targets '[{"Key":"InstanceIds","Values":["${{ env.INSTANCE_ID }}"]}]' \
-            --parameters '{"commands":["mkdir -p /workspace/logs", "echo \"Initializing repo...\"", "repo init -u https://android.googlesource.com/platform/manifest -b refs/tags/android-platform-14.0.0_r19", "echo \"Syncing repo...\"", "repo sync -c -j$(nproc) 2>&1 | tee /workspace/logs/repo_sync.log"]}' \
-            --region eu-north-1
+          while true; do
+            STATUS=$(aws ssm get-command-invocation \
+              --command-id $COMMAND_ID \
+              --instance-id $INSTANCE_ID \
+              --query "Status" --output text)
+            echo "SSM Command Status: $STATUS"
+            if [[ "$STATUS" == "Success" ]]; then
+              echo "SSM commands executed successfully!"
+              break
+            fi
+            sleep 10
+          done
