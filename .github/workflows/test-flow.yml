@@ -3,7 +3,7 @@ name: AOSP Build on EC2 with Docker JOBS
 on:
   push:
     branches:
-      - main
+      - dev
   workflow_dispatch:
 permissions:
   id-token: write
