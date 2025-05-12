@@ -15,6 +15,7 @@ jobs:
       - name: Launch EC2 Instance
         run: |
           mkdir -p /home/ubuntu/output
+          echo "Hello, GitHub Runner!" >> /home/ubuntu/output/myfile.txt
           echo "Pipeline execution result at $(date) > /home/ubuntu/output/result.txt"
           ls -la
         
